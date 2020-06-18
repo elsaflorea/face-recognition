@@ -13,5 +13,5 @@ docker run -ti --rm \
     -v app:/home/root/workspace/app \
     --device=/dev/video0 \
     --name face_recognition_dev \
-    rpi_face_recognition_dev:1.0.0 bash
+    face_recognition_streaming:1.0.0 bash
 ```
