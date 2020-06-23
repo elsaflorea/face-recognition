@@ -7,10 +7,13 @@ import numpy as np
 import pickle
 import cv2
 import os
+import pymysql.cursors
+import smtplib
 
 from configparser import ConfigParser
 config = ConfigParser()
 config.read('config.ini')
+
 
 fmt = '%Y-%m-%d %H:%M:%S'
 last_date = datetime.strptime(datetime.now().strftime(fmt), fmt)
@@ -38,6 +41,21 @@ time.sleep(2.0)
 
 # start the FPS throughput estimator
 fps = FPS().start()
+
+gmail_user = config.get('gmail', 'user')
+gmail_password = config.get('gmail', 'password')
+
+sent_from = gmail_user
+to = [config.get('gmail', 'to')]
+subject = 'Miscare neautorizata detectata'
+
+# Connect to the database
+host = config.get('database', 'host')
+user = config.get('database', 'user')
+password = config.get('database', 'pass')
+db = config.get('database', 'db_name')
+
+db_connection = pymysql.connect(host, user, password, db, charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor)
 
 process = (
     ffmpeg
@@ -111,15 +129,38 @@ while True:
             text = "{}: {:.2f}%".format(name, proba * 100)
             y = startY - 10 if startY - 10 > 10 else startY + 10
             identify_color = (0, 0, 255)
+            check_date = datetime.strptime(datetime.now().strftime(fmt), fmt)
+            timeDiff = (check_date - last_date).seconds
+
             if name != 'unknown':
                 identify_color = (0, 255, 0)
-                check_date = datetime.strptime(datetime.now().strftime(fmt), fmt)
-                timeDiff = (check_date - last_date).seconds
 
                 if timeDiff > 60:
-                    print("I will send email with the photo")
-                    last_date = datetime.strptime(datetime.now().strftime(fmt), fmt)
+                    try:
+                        with db_connection.cursor() as cursor:
+                            # Create a new record
+                            sql = "UPDATE `location_stats` SET `value` = 0 WHERE name = 'state' "
+                            cursor.execute(sql)
+                        db_connection.commit()
+                    finally:
+                        pass
 
+                    last_date = datetime.strptime(datetime.now().strftime(fmt), fmt)
+            else:
+                if timeDiff > 60:
+                    try:
+                        body = f'Miscare neautorizata la {check_date}'
+                        email_text = f'From: {sent_from} \nTo: {", ".join(to)} \nSubject: {subject} \n\n{body}'
+
+                        print(email_text)
+                        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+                        server.ehlo()
+                        server.login(gmail_user, gmail_password)
+                        server.sendmail(sent_from, to, email_text)
+                        server.close()
+                    finally:
+                        pass
+                    last_date = datetime.strptime(datetime.now().strftime(fmt), fmt)
             cv2.rectangle(frame, (startX, startY), (endX, endY),
                           identify_color, 2)
             cv2.putText(frame, text, (startX, y),
